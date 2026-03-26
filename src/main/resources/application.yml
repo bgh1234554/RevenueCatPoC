@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: RevenueCatPoC
+  datasource:
+    url: jdbc:h2:mem:poc
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+  h2:
+    console:
+      enabled: true
+
+revenuecat:
+  webhook:
+    secret: ${REVENUECAT_WEBHOOK_SECRET}   # RevenueCat ????? ??? ?
