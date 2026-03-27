@@ -54,6 +54,12 @@ public class UserPlanService {
 
         switch (action) {
             case SUBSCRIBE, RENEW -> {
+                // startAt 결정
+                Instant startAt = (user.getPlan() == PlanType.PREMIUM
+                        && user.getPlanExpireAt() != null
+                        && user.getPlanExpireAt().isAfter(now))
+                        ? user.getPlanExpireAt()  // RENEW: 기존 만료일부터 시작
+                        : now;                    // SUBSCRIBE: 지금부터 시작
                 // UserPlan 테이블에 새 구독 이력 저장
                 // - startAt: 지금 시점 (PoC 단순화, 실제 구현 시 현재 구독 만료일 기준으로 수정 필요)
                 // - expireAt: RevenueCat이 계산한 만료일 (expiration_at_ms) 그대로 사용
@@ -63,7 +69,7 @@ public class UserPlanService {
                         .plan(PlanType.PREMIUM)
                         .duration(duration)
                         .status(PlanStatus.ACTIVE)
-                        .startAt(now)
+                        .startAt(startAt)
                         .expireAt(newExpireAt)
                         .transactionId(event.getTransaction_id())
                         .build());
@@ -73,17 +79,35 @@ public class UserPlanService {
                 log.info("[Webhook] 플랜 활성화 완료: userId={}, expireAt={}", user.getId(), newExpireAt);
             }
             case CANCEL -> {
-                // 현재 유효한 플랜을 CANCELLED로 마킹
-                // - 만료일은 그대로 유지 (취소해도 만료일까지는 서비스 이용 가능)
-                // - 실제 구현 시 미래 연장분(futurePlans)도 CANCELLED 처리 + 환불 API 호출 필요
+                // 1. 현재 유효한 플랜 조회 (startAt <= now < expireAt)
                 userPlanRepository
                         .findTopByUser_IdAndStartAtLessThanEqualAndExpireAtAfterAndStatusInOrderByExpireAtDesc(
                                 user.getId(), now, now,
                                 List.of(PlanStatus.ACTIVE, PlanStatus.CANCELLED))
-                        .ifPresent(plan -> plan.changeStatus(PlanStatus.CANCELLED));
+                        .ifPresent(currentPlan -> {
 
-                // PlanType은 PREMIUM 유지 (만료일까지는 프리미엄 사용 가능하므로)
-                user.updatePlan(PlanType.PREMIUM, PlanStatus.CANCELLED, user.getPlanExpireAt());
+                            // 2. 현재 플랜 CANCELLED 마킹
+                            if (currentPlan.getStatus() == PlanStatus.ACTIVE) {
+                                currentPlan.changeStatus(PlanStatus.CANCELLED);
+                            }
+
+                            // 3. 미래 연장분 전부 CANCELLED 마킹
+                            // (실제 구현 시 여기에 환불 API 호출 추가 예정)
+                            Instant currentExpireAt = currentPlan.getExpireAt();
+                            List<UserPlan> futurePlans = userPlanRepository
+                                    .findAllByUser_IdAndStartAtGreaterThanEqualAndStatusOrderByStartAtAsc(
+                                            user.getId(), currentExpireAt, PlanStatus.ACTIVE);
+
+                            for (UserPlan futurePlan : futurePlans) {
+                                if (!futurePlan.getId().equals(currentPlan.getId())) {
+                                    futurePlan.changeStatus(PlanStatus.CANCELLED);
+                                }
+                            }
+
+                            // 4. UserEntity는 현재 플랜의 만료일로 업데이트
+                            user.updatePlan(PlanType.PREMIUM, PlanStatus.CANCELLED, currentExpireAt);
+                        });
+
                 log.info("[Webhook] 플랜 취소 완료: userId={}", user.getId());
             }
             // RevenueCat의 RENEWAL(자동갱신) 등 우리 서비스에 해당 없는 이벤트는 무시
