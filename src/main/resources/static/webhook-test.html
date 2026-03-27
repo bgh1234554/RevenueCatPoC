@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>RevenueCat Webhook 테스트</title>
+    <style>
+        body { font-family: sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; }
+        h1 { font-size: 1.4rem; margin-bottom: 24px; }
+        label { display: block; margin-top: 16px; font-weight: bold; font-size: 0.9rem; }
+        select, input { width: 100%; padding: 8px; margin-top: 4px; box-sizing: border-box; font-size: 0.95rem; }
+        button { margin-top: 24px; padding: 10px 24px; font-size: 1rem; cursor: pointer; }
+        pre {
+            margin-top: 24px;
+            background: #f4f4f4;
+            padding: 16px;
+            border-radius: 6px;
+            white-space: pre-wrap;
+            font-size: 0.85rem;
+        }
+        .status-ok  { color: green; font-weight: bold; }
+        .status-err { color: red;   font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<h1>RevenueCat Webhook 테스트</h1>
+
+<label>이벤트 타입</label>
+<select id="type">
+    <option value="INITIAL_PURCHASE">INITIAL_PURCHASE (최초 구독)</option>
+    <option value="NON_RENEWING_PURCHASE">NON_RENEWING_PURCHASE (연장)</option>
+    <option value="CANCELLATION">CANCELLATION (취소)</option>
+</select>
+
+<label>app_user_id (userEmail)</label>
+<input id="app_user_id" type="email" value="test@test.com">
+
+<label>product_id</label>
+<select id="product_id">
+    <option value="premium_monthly">premium_monthly (월간)</option>
+    <option value="premium_yearly">premium_yearly (연간)</option>
+</select>
+
+<label>만료일 (expiration_at_ms)</label>
+<input id="expire_date" type="datetime-local">
+
+<label>transaction_id</label>
+<input id="transaction_id" type="text" value="txn_001">
+
+<label>Webhook Secret</label>
+<input id="secret" type="text" value="dartoo-poc-secret-1234">
+
+<br>
+<button onclick="send()">Webhook 전송</button>
+
+<pre id="result">결과가 여기에 표시됩니다.</pre>
+
+<script>
+    // 기본 만료일: 지금으로부터 30일 후
+    const d = new Date();
+    d.setDate(d.getDate() + 30);
+    document.getElementById('expire_date').value = d.toISOString().slice(0, 16);
+
+    async function send() {
+        const type        = document.getElementById('type').value;
+        const app_user_id = document.getElementById('app_user_id').value;
+        const product_id  = document.getElementById('product_id').value;
+        const expireMs    = new Date(document.getElementById('expire_date').value).getTime();
+        const txnId       = document.getElementById('transaction_id').value;
+        const secret      = document.getElementById('secret').value;
+
+        const payload = {
+            api_version: "1.0",
+            event: {
+                type,
+                app_user_id,
+                product_id,
+                expiration_at_ms: expireMs,
+                transaction_id: txnId
+            }
+        };
+
+        document.getElementById('result').textContent = '전송 중...';
+
+        try {
+            const res = await fetch('/api/webhooks/revenuecat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': secret
+                },
+                body: JSON.stringify(payload)
+            });
+
+            const resultEl = document.getElementById('result');
+            const statusClass = res.ok ? 'status-ok' : 'status-err';
+            const statusText  = res.ok ? '✅ 성공' : '❌ 실패';
+            const bodyText    = await res.text();
+
+            resultEl.innerHTML =
+                `<span class="${statusClass}">${statusText} (HTTP ${res.status})</span>\n\n` +
+                `[요청 payload]\n${JSON.stringify(payload, null, 2)}\n\n` +
+                `[응답]\n${bodyText || '(응답 본문 없음)'}`;
+        } catch (e) {
+            document.getElementById('result').textContent = '❌ 네트워크 오류: ' + e.message;
+        }
+    }
+</script>
+
+</body>
+</html>
